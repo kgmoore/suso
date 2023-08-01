@@ -4,14 +4,7 @@ import numpy as np
 class SudokuBoard:
     def __init__(self):
         self.possibilities = np.ones([9,9,9],"L")
-        self.known_values = np.zeros([9,9],"L")
-        # for row in range(9):
-        #     for col in range(9):
-        #         for slice in range(9):
-        #             self.possibilities[row][col][slice] += 0.0100*row
-        #             self.possibilities[row][col][slice] += 0.0010*col
-        #             self.possibilities[row][col][slice] += 0.0001*slice
-                    
+        self.known_values = np.zeros([9,9],"L")                   
     
     def import_file(self, fileObj):
         for i in range(9):
