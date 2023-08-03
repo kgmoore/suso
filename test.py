@@ -4,7 +4,42 @@ import numpy as np
 class SudokuBoard:
     def __init__(self):
         self.possibilities = np.ones([9,9,9],"L")
-        self.known_values = np.zeros([9,9],"L")                   
+        self.known_values = np.zeros([9,9],"L")
+
+        # create mask patterns in the 9x9x9 possibilites grid (do this once)
+        self.masks = []
+        zero = np.zeros([9,9,9],"L")
+        
+        # 81 row possibilities
+        for stack in range(9):
+            for row in range(9):
+                mask = zero.copy()
+                mask[row,:,stack] = 1
+                assert(mask.sum() == 9)
+                self.masks.append(mask)
+        # 81 column possibilities
+        for stack in range(9):
+            for col in range(9):
+                mask = zero.copy()
+                mask[:,col,stack] = 1
+                assert(mask.sum() == 9)
+                self.masks.append(mask)
+        # 81 stack possibilites
+        for row in range(9):
+            for col in range(9):
+                mask = zero.copy()
+                mask[row,col,:]=1
+                assert(mask.sum() == 9)
+                self.masks.append(mask)
+        # 81 neighborhood possibilities
+        for stack in range(9):
+            for super_row in range(3):
+                for super_col in range(3):
+                    mask = zero.copy()
+                    mask[super_row*3:(super_row+1)*3,super_col*3:(super_col+1)*3,stack] = 1
+                    assert(mask.sum() == 9)
+                    self.masks.append(mask)
+                 
     
     def import_file(self, fileObj):
         for i in range(9):
@@ -85,43 +120,6 @@ class SudokuBoard:
                 self.apply_known_value(iter.multi_index[0],iter.multi_index[1],value)
 
     def run_exclusion_tests(self):
-
-        # create mask patterns in the 9x9x9 possibilites grid (do this once)
-        # 81 column possibilities
-        # 81 neighborhood possibilities
-
-        self.masks = []
-        zero = np.zeros([9,9,9],"L")
-        
-        # 81 row possibilities
-        for stack in range(9):
-            for row in range(9):
-                mask = zero.copy()
-                mask[row,:,stack] = 1
-                assert(mask.sum() == 9)
-                self.masks.append(mask)
-        # 81 column possibilities
-        for stack in range(9):
-            for col in range(9):
-                mask = zero.copy()
-                mask[:,col,stack] = 1
-                assert(mask.sum() == 9)
-                self.masks.append(mask)
-        # 81 stack possibilites
-        for row in range(9):
-            for col in range(9):
-                mask = zero.copy()
-                mask[row,col,:]=1
-                assert(mask.sum() == 9)
-                self.masks.append(mask)
-        # 81 neighborhood possibilities
-        for stack in range(9):
-            for super_row in range(3):
-                for super_col in range(3):
-                    mask = zero.copy()
-                    mask[super_row*3:(super_row+1)*3,super_col*3:(super_col+1)*3,stack] = 1
-                    assert(mask.sum() == 9)
-                    self.masks.append(mask)
 
         #this is where we store the confirmed possibilities of each test, using logical OR 
         # operations (more than one rule can confirm a possibility)
