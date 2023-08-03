@@ -176,6 +176,13 @@ class SudokuBoard:
                 mask[:,col,stack] = 1
                 assert(mask.sum() == 9)
                 self.masks.append(mask)
+        # 81 stack possibilites
+        for row in range(9):
+            for col in range(9):
+                mask = zero.copy()
+                mask[row,col,:]=1
+                assert(mask.sum() == 9)
+                self.masks.append(mask)
         # 81 neighborhood possibilities
         for stack in range(9):
             for super_row in range(3):
