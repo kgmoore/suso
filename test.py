@@ -74,7 +74,7 @@ class SudokuBoard:
         self.known_values[row,col] = value
 
     def apply_exclusion_tests(self):
-        confirmed_values = self.run_exclusion_tests2()
+        confirmed_values = self.run_exclusion_tests()
 
         #iterate over each one and apply it if non zero
         iter = np.nditer(confirmed_values,["multi_index"],["readonly"])
@@ -85,75 +85,6 @@ class SudokuBoard:
                 self.apply_known_value(iter.multi_index[0],iter.multi_index[1],value)
 
     def run_exclusion_tests(self):
-        # exclusion tests means we look in each dimension of the possibilities cube for 1 and only 1 value in a dimension
-        # one and only one in a row means we know the value (basic sudoku rule #1 - rows)
-        # one and only one in a col means we know the value (basic sudoku rule #2 - columns)
-        # one and only one in a stack means we know the value (basic elimination)
-        # one and only one in a neighborhood means we know the value (basic sudoku rule #3 - neighborhoods)
-
-        t = self.possibilities.copy()
-        # 1/ make a reformed possibilities matrix of size 27x3x9 (i.e. columns 1,2,3 then 4,5,6 then 7,8,9 of each row)
-        t = t.reshape([27,3,9])
-
-        # 2/ append the 1st, 4th, 7th rows, then 2nd, 5th, 8th, then 3rd, 6th, 9th etc 
-        #   (back to 9x9x9, with neighboorhoods as rows now)
-        neighborhood_rows = np.block(
-            [[[t[ 0: 3,...]],[t[ 3: 6,...]],[t[ 6: 9,...]]],
-             [[t[ 9:12,...]],[t[12:15,...]],[t[15:18,...]]],
-             [[t[18:21,...]],[t[21:24,...]],[t[24:27,...]]]])
-
-        tests = {
-                    "row":          {'axis':0, 'data':self.possibilities},
-                    "col":          {'axis':1, 'data':self.possibilities},
-                    "stack":        {'axis':2, 'data':self.possibilities},
-                    #"neighborhood": {'axis':0, 'data':neighborhood_rows}, 
-                }
-
-        #this is where we store the confirmed possibilities of each test, using logical OR 
-        # operations (more than one rule can confirm a possibility)
-        confirmed_possibilities = np.zeros([9,9,9],dtype=bool)
-
-        for test_name, test_params in tests.items():
-            test_axis = test_params['axis']
-            test_ndarray = test_params['data']
-            test_result = np.sum(test_ndarray,axis = test_axis) == np.ones([9,9],"L")
-            test_result_count = np.sum(test_result)
-            print(f"There are {test_result_count} known values from the {test_name} test.")
-            
-            # now we need to get the 9x9 sum matrix back into a 1x9x9, 9x1x9, or 9x9x1 matrix so that we can
-            # broadcast it across the possibility cube for filtering 
-            repack_shape_template = [9,9,9]
-            repack_shape = repack_shape_template.copy()
-            repack_shape[test_axis] = 1
-            repack_test_result = np.reshape(test_result, repack_shape)
-            
-            # now expand it back to a 9x9x9 through replication (cells of "1" become vectors of "1")
-            broadcast_test_result = np.broadcast_to(repack_test_result,[9,9,9])
-
-            # now multiply to take only confirmed possibilities
-            partial_confirmed_possibilities = broadcast_test_result * test_ndarray
-            
-            # check to make sure that no additional cells were selected
-            test_result_count_check = np.sum(partial_confirmed_possibilities)
-            assert(test_result_count-test_result_count_check==0)
-
-            # boolean accumulation of partial possibilities
-            partial_confirmed_possibilities_bool = partial_confirmed_possibilities.astype(bool)
-            np.logical_or(confirmed_possibilities,partial_confirmed_possibilities_bool,confirmed_possibilities)
-            #print(f"There are {np.sum(partial_confirmed_possibilities_bool.astype(int))} from this partial test.")
-            #print(f"There are {np.sum(confirmed_possibilities.astype(int))} from all tests to date.")
-
-        #print(f"There are {np.sum(confirmed_possibilities.astype(int))} known values from all tests.")
-
-        # squash back to a 2D grid with values
-        stack_of_values = np.asarray([1,2,3,4,5,6,7,8,9],"L").reshape([1,1,9])
-        confirmed_possibilities_values = confirmed_possibilities.astype(int) * stack_of_values
-        confirmed_values = np.sum(confirmed_possibilities_values,2).astype(int)
-        #print(np.array2string(confirmed_values,max_line_width=120,precision=4))
-
-        return confirmed_values
-
-    def run_exclusion_tests2(self):
 
         # create mask patterns in the 9x9x9 possibilites grid (do this once)
         # 81 column possibilities
