@@ -11,7 +11,7 @@
             "program": "${file}",
             "console": "integratedTerminal",
             "justMyCode": true,
-            "args": ["boards/input_sudoku_easy.txt"]
+            "args": ["boards/20230803_hard_nyt_modified.txt"]
         }
     ]
 }
