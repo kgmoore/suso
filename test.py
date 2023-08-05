@@ -82,8 +82,8 @@ class SudokuBoard:
         return np.sum(self.known_values == np.zeros([9,9],"L"))
     
     def known_value_hash(self):
-        hashlib.sha256(self.known_values.tobytes("<u1"), usedforsecurity=False)
-        return hashlib.hexdigest()
+        hash = hashlib.sha256(self.known_values.tobytes(), usedforsecurity=False)
+        return hash.hexdigest()
     
     def valid(self):
         # if the outer loop has already exhausted all guesses on a board, we mark that board as invalid
@@ -93,10 +93,10 @@ class SudokuBoard:
         # basically the validity array which is the known_values array and the sum along the stack of the 
         # possibility matrix should be non-zero everywhere.
         
-        non_zero_possibilities = np.logical_or(np.sum(self.possibilities,axis=3),self.known_values())
+        non_zero_possibilities = np.logical_or(np.sum(self.possibilities,axis=2),self.known_values)
         validity_count = np.sum(non_zero_possibilities)
         if validity_count != 9*9:
-            print(f"The board({self.known_value_hash()}) has only {validity_count} non-zero possibilities.")
+            print(f"The board({self.known_value_hash()[0:8]}) has only {validity_count} non-zero possibilities.")
             return False
         else:
             return True
@@ -114,7 +114,7 @@ class SudokuBoard:
                     if self.possibilities[row,col,stack] == 1:
                         if guess_counter == guess_index:
                             # make a copy
-                            board_copy = copy(self)
+                            board_copy = copy.deepcopy(self)
                             # apply the guess (turning the "possibility" into known)
                             board_copy.apply_known_value(row,col,stack+1)
                             return (board_copy,(row,col,stack+1))
@@ -211,7 +211,7 @@ class GameGraph:
     # reference from A to B
     def add_edge(self, board_a, board_b, edge_label):
         self.boards[board_a.known_value_hash()]["forward_refs"  ].append((board_b.known_value_hash(),edge_label))
-        self.boards[board_b.known_value_hash()]["backwards_refs"].append((board_a.known_value_hash(),edge_label))
+        self.boards[board_b.known_value_hash()]["backward_refs"].append((board_a.known_value_hash(),edge_label))
     
     def get_board(self, board_hash):
         return self.boards[board_hash]["board"]
@@ -227,6 +227,8 @@ class GameGraph:
         unfilled_cells_from_board_hash = lambda y: self.boards[y]["board"][0].unfilled_cells()
 
         # use the min function, keyed with the above function to find the best board
+        print(f"best_back_reference: board({board_hash[0:8]}) has {len(self.boards[board_hash]['backward_refs'])} ",
+              f"back references.")
         best_back_ref_hash,edge_label = min(self.boards[board_hash]["backward_refs"],key=unfilled_cells_from_board_hash)
 
         # return the reference to that board
@@ -245,14 +247,22 @@ class SudokuGame:
         current_board.import_file(board_file)
 
         # populate the game graph
-        self.game_graph.add_node(current_board)
+        self.game_graph.add_board(current_board)
 
         while(True):
-        #   run exclusion on the current board
+            iteration_count += 1
+            # run exclusion on the current board
             current_board.apply_exclusion_tests()
-            print(f"*** After iteration {iteration_count} the board({current_board.known_value_hash()[0:8]}) has\
-                   {current_board.unfilled_cells()} unfilled cells.")
-        #   if board is complete:
+            print(f"*** At iteration {iteration_count} the board({current_board.known_value_hash()[0:8]}) has ",
+                  f"{current_board.unfilled_cells()} unfilled cells.")
+            
+            # this is very gross, but we may need edges for guessing and for excluding, 
+            # because they get different board states.
+            if current_board.known_value_hash() not in self.game_graph:
+                print(f"Adding current_board({current_board.known_value_hash()[0:8]}) after exclusions")
+                self.game_graph.add_board(current_board)
+
+            # if board is complete:
             if current_board.unfilled_cells() == 0:
                 print(f"Board is solved.")
                 break
@@ -271,8 +281,8 @@ class SudokuGame:
                     if guess_board == None:
                         # there are no guesses left, that means we need to mark this board invalid and backtrack
                         current_board.force_invalid()
-                        print(f"Run out of guesses after {i} attempts.\
-                               Marking board({current_board.known_value_hash()[0:8]}) invalid.")
+                        print(f"Run out of guesses after {i} attempts. ",
+                              f"Marking board({current_board.known_value_hash()[0:8]}) invalid.")
                         # Lazy backtrack: exit this loop, and let the above validity check kick it off
                         break
                         
@@ -280,22 +290,25 @@ class SudokuGame:
                     if guess_board in self.game_graph:
                         # if guess board is valid
                         if self.game_graph.get_matching_board(guess_board).valid():
-                            print(f"Critical Error. Guess board({guess_board.known_value_hash()[0:8]}) from guess\
-                                   {guess_info} exists and is valid. Exiting.")
+                            print(f"Critical Error. Guess board({guess_board.known_value_hash()[0:8]}) from guess ",
+                                  f"{guess_info} exists and is valid. Exiting.")
                             sys.exit(0)
                         else:
                             # expected case after backtracking, we've tried this before, it didn't work
-                            print(f"Rejecting guess {guess_info} yielding board({guess_board.known_value_hash()[0:8]})\
-                                   since known to be invalid.")
+                            print(f"Rejecting guess {guess_info} yielding board({guess_board.known_value_hash()[0:8]}) ",
+                                  f"since known to be invalid.")
                             continue
                     else:
                         # this is a novel board
+                        print(f"Loading guess_board({guess_board.known_value_hash()[0:8]})")
                         self.game_graph.add_board(guess_board)
+                        print(f"Adding a guess({guess_info} between current_board({current_board.known_value_hash()[0:8]}) ",
+                              f"and guess_board({guess_board.known_value_hash()[0:8]})")
                         self.game_graph.add_edge(current_board,guess_board,guess_info)
                         current_board = guess_board
                         # so we break out of the for loop and start again
-                        print(f"Guess {i} was {guess_info} yielding novel board{guess_board.known_value_hash()[0:8]}.\
-                               Making this board the current board.")
+                        print(f"Guess {i} was {guess_info} yielding novel board({guess_board.known_value_hash()[0:8]}). ",
+                              f"Making this board the current board.")
                         break        
                  
     
