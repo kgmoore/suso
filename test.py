@@ -1,68 +1,64 @@
 import sys
+import copy
 import numpy as np
+import hashlib
 
 class SudokuBoard:
+    # class variables up here
+    # create mask patterns in the 9x9x9 possibilites grid (do this once)
+    masks = []
+    zero = np.zeros([9,9,9],"L")
+    
+    # 81 row possibilities
+    for stack in range(9):
+        for row in range(9):
+            mask = zero.copy()
+            mask[row,:,stack] = 1
+            assert(mask.sum() == 9)
+            masks.append(mask)
+    # 81 column possibilities
+    for stack in range(9):
+        for col in range(9):
+            mask = zero.copy()
+            mask[:,col,stack] = 1
+            assert(mask.sum() == 9)
+            masks.append(mask)
+    # 81 stack possibilites
+    for row in range(9):
+        for col in range(9):
+            mask = zero.copy()
+            mask[row,col,:]=1
+            assert(mask.sum() == 9)
+            masks.append(mask)
+    # 81 neighborhood possibilities
+    for stack in range(9):
+        for super_row in range(3):
+            for super_col in range(3):
+                mask = zero.copy()
+                mask[super_row*3:(super_row+1)*3,super_col*3:(super_col+1)*3,stack] = 1
+                assert(mask.sum() == 9)
+                masks.append(mask)
+                        
+
     def __init__(self):
         self.possibilities = np.ones([9,9,9],"L")
         self.known_values = np.zeros([9,9],"L")
-
-        # create mask patterns in the 9x9x9 possibilites grid (do this once)
-        self.masks = []
-        zero = np.zeros([9,9,9],"L")
-        
-        # 81 row possibilities
-        for stack in range(9):
-            for row in range(9):
-                mask = zero.copy()
-                mask[row,:,stack] = 1
-                assert(mask.sum() == 9)
-                self.masks.append(mask)
-        # 81 column possibilities
-        for stack in range(9):
-            for col in range(9):
-                mask = zero.copy()
-                mask[:,col,stack] = 1
-                assert(mask.sum() == 9)
-                self.masks.append(mask)
-        # 81 stack possibilites
-        for row in range(9):
-            for col in range(9):
-                mask = zero.copy()
-                mask[row,col,:]=1
-                assert(mask.sum() == 9)
-                self.masks.append(mask)
-        # 81 neighborhood possibilities
-        for stack in range(9):
-            for super_row in range(3):
-                for super_col in range(3):
-                    mask = zero.copy()
-                    mask[super_row*3:(super_row+1)*3,super_col*3:(super_col+1)*3,stack] = 1
-                    assert(mask.sum() == 9)
-                    self.masks.append(mask)
-                 
+        self.forced_invalid = False
     
-    def import_file(self, fileObj):
-        for i in range(9):
-            line = fileObj.readline()
-            for j in range(9):
-                if line[j] == "*":
-                    continue
-                else:
-                    self.apply_known_value(i,j,int(line[j]))
-
-    def print_board_old_code(self):
-        board_string = ""
-        board_string += "-"*(3*3 + 4) + "\n"
-        for super_row in range(3):
-            for row in range(3):
-                board_string += "|"
-                for super_col in range(3):
-                    for col in range(3):
-                        board_string += f"{self.current_state[super_row*3+row][super_col*3+col]}"
-                    board_string += "|"
-                board_string += "\n"
-            board_string += "-"*(3*3 + 4) + "\n"
-        return board_string
+    
+    # def print_board_old_code(self):
+    #     board_string = ""
+    #     board_string += "-"*(3*3 + 4) + "\n"
+    #     for super_row in range(3):
+    #         for row in range(3):
+    #             board_string += "|"
+    #             for super_col in range(3):
+    #                 for col in range(3):
+    #                     board_string += f"{self.current_state[super_row*3+row][super_col*3+col]}"
+    #                 board_string += "|"
+    #             board_string += "\n"
+    #         board_string += "-"*(3*3 + 4) + "\n"
+    #     return board_string
     
     def print_board(self):
         board_string = ""
@@ -85,8 +81,62 @@ class SudokuBoard:
     def unfilled_cells(self):
         return np.sum(self.known_values == np.zeros([9,9],"L"))
     
-    def apply_known_value(self, row, col, value):
+    def known_value_hash(self):
+        hashlib.sha256(self.known_values.tobytes("<u1"), usedforsecurity=False)
+        return hashlib.hexdigest()
+    
+    def valid(self):
+        # if the outer loop has already exhausted all guesses on a board, we mark that board as invalid
+        if self.forced_invalid == True: return False
         
+        # a valid board is defined as one where there is at least one possibility for all unknown cells
+        # basically the validity array which is the known_values array and the sum along the stack of the 
+        # possibility matrix should be non-zero everywhere.
+        
+        non_zero_possibilities = np.logical_or(np.sum(self.possibilities,axis=3),self.known_values())
+        validity_count = np.sum(non_zero_possibilities)
+        if validity_count != 9*9:
+            print(f"The board({self.known_value_hash()}) has only {validity_count} non-zero possibilities.")
+            return False
+        else:
+            return True
+        
+    def guess(self, guess_index):
+        # simplest thing that could possibly work: 
+        # 1/iterate, row, column, stack.
+        # 2/find the ith possibility, clone the board, apply the guess as truth
+        # 3/return the new board and the guess signature
+
+        guess_counter = 0
+        for row in range(9):
+            for col in range(9):
+                for stack in range(9):
+                    if self.possibilities[row,col,stack] == 1:
+                        if guess_counter == guess_index:
+                            # make a copy
+                            board_copy = copy(self)
+                            # apply the guess (turning the "possibility" into known)
+                            board_copy.apply_known_value(row,col,stack+1)
+                            return (board_copy,(row,col,stack+1))
+                        else:
+                            guess_counter += 1
+        # this means we simply couldn't find enough guesses to satisfy, so return None
+        return (None,None)
+        
+
+
+    # mutating function all below here
+    def import_file(self, fileObj):
+        for i in range(9):
+            line = fileObj.readline()
+            for j in range(9):
+                if line[j] == "*":
+                    continue
+                else:
+                    self.apply_known_value(i,j,int(line[j]))
+
+
+    def apply_known_value(self, row, col, value):
         assert(row < 9)
         assert(col < 9)
         assert(value <= 9)
@@ -125,7 +175,7 @@ class SudokuBoard:
         # operations (more than one rule can confirm a possibility)
         confirmed_possibilities = np.zeros([9,9,9],dtype=bool)
 
-        #for each of the 243 stamp and sum the matrix
+        #for each of the 81*4 masks and sum the matrix
         for mask in self.masks:
             masked_possibities = self.possibilities * mask
         
@@ -148,10 +198,123 @@ class SudokuBoard:
         #don't know how to code this yet ;)
         pass
 
+    def force_invalid(self):
+        self.forced_invalid = True
+
+class GameGraph:
+    def __init__(self):
+        self.boards = {}
+    
+    def add_board(self, board):
+        self.boards[board.known_value_hash()] = {"board":board,"forward_refs":[], "backward_refs":[]}
+
+    # reference from A to B
+    def add_edge(self, board_a, board_b, edge_label):
+        self.boards[board_a.known_value_hash()]["forward_refs"  ].append((board_b.known_value_hash(),edge_label))
+        self.boards[board_b.known_value_hash()]["backwards_refs"].append((board_a.known_value_hash(),edge_label))
+    
+    def get_board(self, board_hash):
+        return self.boards[board_hash]["board"]
+    
+    def __contains__(self,guess_board_hash):
+        return guess_board_hash in self.boards
+    
+    def get_matching_board(self,board):
+        return self.boards[board.known_value_hash()]["board"]
+    
+    def best_back_reference(self,board_hash):
+        # define a quick function that can take a hash and return the unfilled cells of that board
+        unfilled_cells_from_board_hash = lambda y: self.boards[y]["board"][0].unfilled_cells()
+
+        # use the min function, keyed with the above function to find the best board
+        best_back_ref_hash,edge_label = min(self.boards[board_hash]["backward_refs"],key=unfilled_cells_from_board_hash)
+
+        # return the reference to that board
+        return (best_back_ref_hash,edge_label)
+    
+
+class SudokuGame:
+    def __init__(self):
+        self.game_graph = GameGraph()
+    
+    def run_game(self,board_file):
+        iteration_count = 0
+
+        # populate the node
+        current_board = SudokuBoard()
+        current_board.import_file(board_file)
+
+        # populate the game graph
+        self.game_graph.add_node(current_board)
+
+        while(True):
+        #   run exclusion on the current board
+            current_board.apply_exclusion_tests()
+            print(f"*** After iteration {iteration_count} the board({current_board.known_value_hash()[0:8]}) has\
+                   {current_board.unfilled_cells()} unfilled cells.")
+        #   if board is complete:
+            if current_board.unfilled_cells() == 0:
+                print(f"Board is solved.")
+                break
+
+            # now we need to see if we excluded ourselves into invalidity
+            if current_board.valid() == False:
+                # time to backtrack
+                (best_back_ref_hash,edge_label) = self.game_graph.best_back_reference(current_board.known_value_hash())
+                print(f"backtracking to board({best_back_ref_hash[0:8]}, reversing the guess {edge_label})")
+                current_board = self.game_graph.get_matching_board(best_back_ref_hash)
+            else:
+                for i in range(9*9):
+                    # ask for the ith guess (i.e. assume the ith possibility is true)
+                    guess_board, guess_info = current_board.guess(i)
+
+                    if guess_board == None:
+                        # there are no guesses left, that means we need to mark this board invalid and backtrack
+                        current_board.force_invalid()
+                        print(f"Run out of guesses after {i} attempts.\
+                               Marking board({current_board.known_value_hash()[0:8]}) invalid.")
+                        # Lazy backtrack: exit this loop, and let the above validity check kick it off
+                        break
+                        
+                    # if guess board is in the graph already
+                    if guess_board in self.game_graph:
+                        # if guess board is valid
+                        if self.game_graph.get_matching_board(guess_board).valid():
+                            print(f"Critical Error. Guess board({guess_board.known_value_hash()[0:8]}) from guess\
+                                   {guess_info} exists and is valid. Exiting.")
+                            sys.exit(0)
+                        else:
+                            # expected case after backtracking, we've tried this before, it didn't work
+                            print(f"Rejecting guess {guess_info} yielding board({guess_board.known_value_hash()[0:8]})\
+                                   since known to be invalid.")
+                            continue
+                    else:
+                        # this is a novel board
+                        self.game_graph.add_board(guess_board)
+                        self.game_graph.add_edge(current_board,guess_board,guess_info)
+                        current_board = guess_board
+                        # so we break out of the for loop and start again
+                        print(f"Guess {i} was {guess_info} yielding novel board{guess_board.known_value_hash()[0:8]}.\
+                               Making this board the current board.")
+                        break        
+                 
+    
+
+    # How are we going to handle the guesses?
+    # 1/ keep several boards in a graph, nodes are boards states, edges are guesses
+    # 2/ When the apply exclusion tests loop terminates, then make a guess
+    # 3/ guesses are good until marked bad
+    # 4/ a bad guess is one where the possibilities matrix has zeros in the stacks where no value is known
+    # 5/ when you get a bad guess, go backwards down the graph and make a choice that's not to a bad board
+
 
 if __name__ == "__main__":        
         
     board_file = open(sys.argv[1])
+
+    the_game = SudokuGame()
+    the_game.run_game(board_file)
+    sys.exit(0)
 
     iteration_count = 0
     the_board = SudokuBoard()
