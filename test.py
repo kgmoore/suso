@@ -91,20 +91,27 @@ class SudokuBoard:
         return self._creation_hash
 
     def valid(self):
-        # if the outer loop has already exhausted all guesses on a board, we mark that board as invalid
+
+        # There are three methods a board can be invalid, we'll test them all returning False if we find them
+
+        # Method 1 - if the outer loop has already exhausted all guesses on a board, we mark that board as invalid
         if self.forced_invalid == True: return False
-        
-        # a valid board is defined as one where there is at least one possibility for all unknown cells
-        # basically the validity array which is the known_values array and the sum along the stack of the 
-        # possibility matrix should be non-zero everywhere.
-        
+
+        # Method 2 - The known values array can be contradictory. You can get here when the stack tests find the same
+        # one and only one option for the same value in the same mask (i.e. two cells in row N must be value V)
+        if (SudokuBoard.check_board_array(self.known_values) == False):
+            print(f"The board({self.creation_hash()}) is INVALID due to the known_values being contradictory.")
+            return False
+
+        # Method 3 - The unknown cells might have zero options for an unknown cell (i.e. overdetermined system)
         non_zero_possibilities = np.logical_or(np.sum(self.possibilities,axis=2),self.known_values)
         validity_count = np.sum(non_zero_possibilities)
         if validity_count != 9*9:
             #print(f"The board({self.creation_hash()}) is INVALID with {9*9 - validity_count} cell(s) with zero possibilities.")
             return False
-        else:
-            return True
+        
+        # Board is valid by all known tests
+        return True
         
     def guess(self, guess_index):
         # simplest thing that could possibly work: 
@@ -127,8 +134,6 @@ class SudokuBoard:
                             guess_counter += 1
         # this means we simply couldn't find enough guesses to satisfy, so return None
         return (None,None)
-        
-
 
     # mutating function all below here
     def import_file(self, fileObj):
@@ -140,8 +145,10 @@ class SudokuBoard:
                 else:
                     self.apply_known_value(i,j,int(line[j]))
 
-
     def apply_known_value(self, row, col, value):
+        value_type = type(value)
+        row_type = type(row)
+        assert(type(value) == type(1))
         assert(row < 9)
         assert(col < 9)
         assert(value <= 9)
@@ -160,21 +167,30 @@ class SudokuBoard:
         self.possibilities[row,col,:] = 0 
         # step four - clear out neighborhood
         self.possibilities[super_row*3:(super_row+1)*3,super_col*3:(super_col+1)*3,value-1] = 0
-        # step five - replace the "one" value in the correct cell
+        
+        # step 5A - precheck the board
+        # if SudokuBoard.check_board_array(self.known_values) == False:
+        #     print(f"Error. Pre-application board is invalid")
+        #     sys.exit(1)
+        
+        # step 5B - replace the "one" value in the correct cell
         self.known_values[row,col] = value
-    
+
+        # step 5C - postcheck the board
+        if SudokuBoard.check_board_array(self.known_values) == False:
+            print(f"INFO: Post-application board is invalid when setting [({row},{col}) = {value}]")
 
     def apply_exclusion_tests(self):
-        confirmed_values = self.run_exclusion_tests()
+        confirmed_value_list = self.run_exclusion_tests()
 
-        #iterate over each one and apply it if non zero
-        iter = np.nditer(confirmed_values,["multi_index"],["readonly"])
-
-        for value in iter:
-            #print("%d <%s>" % (value, iter.multi_index), end=' ')
-            if value != 0:
-                self.apply_known_value(iter.multi_index[0],iter.multi_index[1],value)
-
+        print(f"Adding the following confirmed values to the board.")
+        print(f"Board:")
+        print(self.print_board())
+        for position_value in confirmed_value_list:
+                print(position_value)
+                print(f"Applying {position_value[3]} at [({position_value[0]},{position_value[1]})]")
+                self.apply_known_value(position_value[0],position_value[1],position_value[3])
+        
     def run_exclusion_tests(self):
 
         #this is where we store the confirmed possibilities of each test, using logical OR 
@@ -188,13 +204,102 @@ class SudokuBoard:
             #if sum is 1, logically OR the confirmation matrix
             if np.sum(masked_possibities) == 1:
                 np.logical_or(confirmed_possibilities,masked_possibities,confirmed_possibilities)
-        
+                
+                # for each board cell, count how many values are "confirmed" for that cell. More than 
+                # one is clearly in invalid board.
+                confirmed_value_count = np.sum(confirmed_possibilities,axis=2,dtype='uint64')
+                if (np.max(confirmed_value_count) > 1):
+                    print(f"Suspected Invalid Board.")
+                    np.array2string()
+
         # squash back to a 2D grid with confirmed values
         stack_of_values = np.asarray([1,2,3,4,5,6,7,8,9],"L").reshape([1,1,9])
         confirmed_possibilities_values = confirmed_possibilities.astype(int) * stack_of_values
-        confirmed_values = np.sum(confirmed_possibilities_values,2).astype(int)
+        confirmed_value_array = np.sum(confirmed_possibilities_values,2).astype(int)
 
-        return confirmed_values
+        # another tye of board invalidity can show up here. your possibilites matrix was valid, 
+        # and you ran the exclusion tests and TWO cells in the same mask wanted to be the same value
+        # an example would be if a row test showed that both (4,4) and (4,7) wanted to be a 3, so the row mask 
+        # didn't trigger, but then the stack test for (4,4) and (4,7) showed that those cells could only be a 3
+        # so both of those stack tests fired. I think only stack tests can generate this error, because row, col, 
+        # and neighborhood tests are directly testing game validity criteria.
+        #
+        # I think this can be seen by looking for contradictions in the "confirmed values" only, without 
+        # comparing to the known values. This seems counterintuitive but that information is already encoded 
+        # in the "possibilities matrix"
+        # 
+        # to check the contradictions, we are going to put the answer in list form rather than array form, 
+        # this will make the calling functions simpler
+        
+        confirmed_value_list = []
+        contradiction = False
+        iter = np.nditer(confirmed_value_array,["multi_index"],["readonly"])
+
+        for value in iter:
+            cell_value = value.tolist()
+            assert(type(cell_value) == type(1))
+            assert(cell_value <= 9)
+            
+            
+            if cell_value != 0:
+                row = iter.multi_index[0]
+                col = iter.multi_index[1]
+                neighborhood = (row // 3)*3 + (col // 3)
+                if(cell_value <=9):
+                    print(confirmed_value_array)
+                    assert(cell_value)
+
+                assert(cell_value >=1)
+                assert(row<9)
+                assert(col<9)
+                assert(neighborhood<9)
+                print(f"Adding [r:{row},col:{col},neighborhood:{neighborhood}]={cell_value} to the confirmed_value_list")
+                confirmed_value_list.append((row,col,neighborhood,cell_value))
+
+        return confirmed_value_list
+
+
+        # row_check = {}
+        # for row in range(9): row_check[row] = []
+        # col_check = {}
+        # for col in range(9): col_check[col] = []
+        # neighborhood_check = {}
+        # for neighborhood in range(9): neighborhood_check[neighborhood] = []
+
+        # for value in iter:
+        #     if value != 0:
+        #         row = iter.multi_index[0]
+        #         col = iter.multi_index[1]
+        #         neighborhood = (row // 3)*3 + (col // 3)
+
+        #         if value in row_check[row]:
+        #             contradiction = True
+        #             break
+        #         else:
+        #             row_check[row].append(value)
+                
+        #         if value in col_check[col]:
+        #             contradiction = True
+        #             break
+        #         else:
+        #             col_check[col].append(value)
+
+        #         if value in neighborhood_check[neighborhood]:
+        #             contradiction = True
+        #             break
+        #         else:
+        #             neighborhood_check[neighborhood].append(value)
+
+        #         confirmed_value_list.append((row,col,neighborhood,value))
+
+        # if contradiction:
+        #     print(f"Contradiction. Board Invalid due to [r:{row},col:{col},neighborhood:{neighborhood}]={value}")
+        #     print(f"Current Confirmed List is:")
+        #     for confirmed_value in confirmed_value_list:
+        #         print(f"[({confirmed_value[0]},{confirmed_value[1]})](n:{confirmed_value[2]}) = {confirmed_value[3]}")
+        #     return (False,[])
+        # else:
+        #     return (True, confirmed_value_list)
 
     def tuple_elimination_tests(self):
         # apply the idea that if two cells in a set have only A and B as possibilities, then no
@@ -207,7 +312,56 @@ class SudokuBoard:
     def force_invalid(self):
         self.forced_invalid = True
     
+    def check_board_array(board_array):
+        #scan rows columns and neighborhoods looking for duplicates
+        for row in range(9):
+            existing_values = {}
+            for col in range(9):
+                value = board_array[row,col]
+                if value == 0: continue
+                if value in existing_values:
+                    # print(f"Board found invalid scanning row {row}.")
+                    # print(f"({row},{col})={value} which already exists.")
+                    # print(np.array2string(board_array))
+                    return False
+                else:
+                    existing_values[value] = True
+        
+        for col in range(9):
+            existing_values = {}
+            for row in range(9):
+                value = board_array[row,col]
+                if value == 0: continue
+                if value in existing_values:
+                    # print(f"Board found invalid scanning col {col}.")
+                    # print(f"({row},{col})={value} which already exists.")
+                    # print(self.print_board())
+                    return False
+                else:
+                    existing_values[value] = True
+        
+        for super_row in range(3):
+            for super_col in range(3):
+                existing_values = {}
+                for row in range(3):
+                    for col in range(3):
+                        check_row = super_row*3 + row
+                        check_col = super_col*3 + col
+                        value = board_array[check_row,check_col]  
+                        if value == 0: continue
+                        if value in existing_values:
+                            # print(f"Board found invalid scanning neighborhood ({super_row},{super_col}).")
+                            # print(f"({check_row},{check_col})={value} which already exists.")
+                            # print(self.print_board())
+                            return False
+                        else:
+                            existing_values[value] = True
+        return True
+    
     def check_board(self):
+        return SudokuBoard.check_board_array(self.known_values)
+
+    def check_board2(self):
 
         check_masks = []
 
@@ -297,12 +451,14 @@ class SudokuGame:
         while(True):
             iteration_count += 1
             # run exclusion on the current board
-            current_board.apply_exclusion_tests()
+            no_contradiction = current_board.apply_exclusion_tests()
+
             print(f"*** At iteration {iteration_count} the board({current_board.creation_hash()}) has",
                   f"{current_board.unfilled_cells()} unfilled cells.")
             
             # this is very gross, but we may need edges for guessing and for excluding, 
             # because they get different board states.
+            # TODO: do we need this? since we added the creation_hash fixity?
             if current_board.creation_hash() not in self.game_graph:
                 print(f"Adding current_board({current_board.creation_hash()}) after exclusions")
                 self.game_graph.add_board(current_board)
@@ -310,7 +466,6 @@ class SudokuGame:
             # if board is complete:
             if current_board.unfilled_cells() == 0:
                 print(f"Board is solved.")
-                print(current_board.print_board())
                 if current_board.check_board():
                     print("Board is valid.")
                 else:
