@@ -2,6 +2,9 @@ import sys
 import copy
 import numpy as np
 import hashlib
+import time
+
+
 
 class SudokuBoard:
     # class variables up here
@@ -38,43 +41,43 @@ class SudokuBoard:
                 mask[super_row*3:(super_row+1)*3,super_col*3:(super_col+1)*3,stack] = 1
                 assert(mask.sum() == 9)
                 masks.append(mask)
-                        
 
     def __init__(self):
-        self.possibilities = np.ones([9,9,9],"L")
         self.known_values = np.zeros([9,9],"L")
-        self.forced_invalid = False
         self._creation_hash = ""
+
+    def initialize_board_from_string(self,input_string):
+        for row in range(9):
+            for col in range(9):
+                value = int(input_string[row*9+col])
+                self.known_values[row][col] = value
 
     def format_guess(guess):
         return f"[({guess[0]},{guess[1]})=={guess[2]}]"
     
-    # def print_board_old_code(self):
-    #     board_string = ""
-    #     board_string += "-"*(3*3 + 4) + "\n"
-    #     for super_row in range(3):
-    #         for row in range(3):
-    #             board_string += "|"
-    #             for super_col in range(3):
-    #                 for col in range(3):
-    #                     board_string += f"{self.current_state[super_row*3+row][super_col*3+col]}"
-    #                 board_string += "|"
-    #             board_string += "\n"
-    #         board_string += "-"*(3*3 + 4) + "\n"
-    #     return board_string
-    
     def print_board(self):
-        board_string = ""
+        grid_string = ""
         for slice in range(9):
-            #board_string += f"** Possibilities Slice Value {slice+1} **\n"
-            #board_string += np.array2string(self.possibilities[:,:,slice],max_line_width=120,precision=4)
-            #board_string += "\n"
+            #grid_string += f"** Possibilities Slice Value {slice+1} **\n"
+            #grid_string += np.array2string(self.possibilities[:,:,slice],max_line_width=120,precision=4)
+            #grid_string += "\n"
             continue
         
-        #board_string += f"**** Known Values ****\n"
-        board_string += np.array2string(self.known_values,max_line_width=120,precision=4) 
-        return board_string
+        #grid_string += f"**** Known Values ****\n"
+        grid_string += np.array2string(self.known_values,max_line_width=120,precision=4) 
+        return grid_string
     
+    def print_board_string(self):
+        return_string = ""
+        for row in range(9):
+            for col in range(9):
+                return_string += str(self.known_values[row][col])
+        return return_string
+
+    
+    def get_board(self):
+        return self.known_values
+
     def possibilities_sum(self):
         return np.sum(self.possibilities)
     
@@ -154,20 +157,6 @@ class SudokuBoard:
         assert(value <= 9)
         assert(value >= 1)
 
-        super_row = row // 3
-        super_col = col // 3
-
-        pre_size = np.sum(self.possibilities)
-
-        # step one - clear out column
-        self.possibilities[row,:,value-1] = 0
-        # step two - clear out row
-        self.possibilities[:,col,value-1] = 0
-        # step three - clear out z stack
-        self.possibilities[row,col,:] = 0 
-        # step four - clear out neighborhood
-        self.possibilities[super_row*3:(super_row+1)*3,super_col*3:(super_col+1)*3,value-1] = 0
-        
         # step 5A - precheck the board
         # if SudokuBoard.check_board_array(self.known_values) == False:
         #     print(f"Error. Pre-application board is invalid")
@@ -177,9 +166,96 @@ class SudokuBoard:
         self.known_values[row,col] = value
 
         # step 5C - postcheck the board
-        if SudokuBoard.check_board_array(self.known_values) == False:
-            print(f"INFO: Post-application board is invalid when setting [({row},{col}) = {value}]")
+        #if SudokuBoard.check_board_array(self.known_values) == False:
+        #    print(f"INFO: Post-application board is invalid when setting [({row},{col}) = {value}]")
 
+    def apply_known_cell_to_possibilities(row,col,value,possibilities):
+        assert(type(value) == type(1))
+        assert(row<9)
+        assert(col<9)
+        assert(value>=1)
+        assert(value<=9)
+
+        super_row = row // 3
+        super_col = col // 3
+
+        # step one - clear out column
+        possibilities[row,:,value-1] = 0
+        # step two - clear out row
+        possibilities[:,col,value-1] = 0
+        # step three - clear out z stack
+        possibilities[row,col,:] = 0 
+        # step four - clear out neighborhood
+        possibilities[super_row*3:(super_row+1)*3,super_col*3:(super_col+1)*3,value-1] = 0
+        # step five - restore the "possibility" in the known location
+        possibilities[row,col,value-1] = 1
+
+    def convert_possibilities_to_known_values(possibilities):
+        assert(possibilities.shape == (9,9,9))
+        
+        # these are the cells we know, because they have only one possibility 
+        possibilities_per_cell = np.sum(possibilities,axis=2)
+        known_cells = (possibilities_per_cell == np.ones([9,9],dtype=np.uint))
+        
+        # then we take it back to a 9x9x9 array (so the known values become stacks)
+        known_cell_stacks = known_cells.reshape([9,9,1]) * np.ones([9,9,9],dtype=np.uint)
+
+        # then mask out the possibilities that are not "known"
+        confirmed_possibilites = known_cell_stacks * possibilities
+
+        # quick check to confirm that there are zero or one possibilities per stack
+        assert(np.max(np.sum(confirmed_possibilites,axis=2)) <= 1)
+
+        # build a stack of incrementing values
+        stack_values = np.arange(1,10,dtype=np.uint).reshape([1,1,9])
+        
+        # use that stack to convert positions to values
+        confirmed_values = confirmed_possibilites*stack_values
+
+        # reduce to a 2d array again
+        known_values = np.sum(confirmed_values,axis=2)
+
+        return known_values
+    
+    def find_implied_cells(known_values):
+        # create the possibilities grid
+        confirmed_possibilities = np.ones([9,9,9],dtype=bool)
+
+        # apply each known value
+        for row in range(9):
+            for col in range(9):
+                value = known_values[row][col]
+                if value != 0:
+                    SudokuBoard.apply_known_cell_to_possibilities(row,col,int(value),confirmed_possibilities)
+        
+        known_and_implied_values = SudokuBoard.convert_possibilities_to_known_values(confirmed_possibilities)
+
+        return known_and_implied_values
+        
+    def apply_constraints_iteratively(self):
+        starting = 0
+        ending = 81
+        iterations = 0
+        while starting < ending:
+            starting = self.filled_cells()
+            self.known_values = SudokuBoard.find_implied_cells(self.known_values)
+            iterations += 1
+            ending = self.filled_cells()
+        return iterations
+    
+    def check_solution_string(self,solution_string):
+        for row in range(9):
+            for col in range(9):
+                solution_value = int(solution_string[row*9+col])
+                board_value = self.known_values[row][col]
+                if board_value != 0:
+                    if board_value != solution_value:
+                        assert(0)
+                        return False
+        return True
+                 
+        
+        
     def apply_exclusion_tests(self):
         confirmed_value_list = self.run_exclusion_tests()
 
@@ -445,6 +521,20 @@ class SudokuGame:
         current_board.import_file(board_file)
         current_board.mark_creation_hash()
 
+        print(f"Board at iteration 0:")
+        print(current_board.print_board())
+        current_board.apply_constraints()
+
+        print(f"Board at iteration 1:")
+        print(current_board.print_board())
+        current_board.apply_constraints()
+
+        print(f"Board at iteration 2:")
+        print(current_board.print_board())
+        current_board.apply_constraints()
+
+
+        sys.exit(1)
         # populate the game graph
         self.game_graph.add_board(current_board)
 
@@ -528,9 +618,63 @@ class SudokuGame:
     # 4/ a bad guess is one where the possibilities matrix has zeros in the stacks where no value is known
     # 5/ when you get a bad guess, go backwards down the graph and make a choice that's not to a bad board
 
+def run_many_games(count):
+    game_file = open("boards/sudoku_hard.csv")
+    hard_game_file = open("boards/hardgames.csv",mode="w")
+
+    header = game_file.readline()
+    hard_game_file.write(header)
+
+    final_filled_array = np.zeros([count],dtype=int)
+    iterations_array = np.zeros([count],dtype=int)
+    
+    start_time = time.time()
+
+    for i in range(count):
+        game = game_file.readline()
+        try:
+            board_string, solution = game.split(",")
+        except ValueError:
+            print("Ran out of games in input file")
+            break
+        sb = SudokuBoard()
+        sb.initialize_board_from_string(board_string)
+        iterations = sb.apply_constraints_iteratively()
+        ending = sb.filled_cells()
+        assert(sb.check_solution_string(solution))
+        final_filled_array[i] = ending
+        iterations_array[i] = iterations
+        
+        if ending != 81:
+            print(f"*** Could not solve board {i} after {iterations} iterations ***")
+            print(sb.print_board())
+            print(f"Initial : {board_string}")
+            print(f"Progress: {sb.print_board_string()}")
+            print(f"Solution: {solution}")
+            hard_game_file.write(game)
+
+    end_time = time.time()
+
+    final_bincount = np.bincount(final_filled_array)   
+    print(f"Final Results:")
+    print(final_bincount)
+
+    iter_bincount  = np.bincount(iterations_array)   
+    print(f"Iterations:")
+    print(iter_bincount)
+
+    elapsed = end_time - start_time
+    print(f"Processed {i} games in {elapsed:.2f} seconds. ({i/elapsed:.2f} games per second)")
+    
+    hard_game_file.close()
+
+
 
 if __name__ == "__main__":        
-        
+
+    run_many_games(100000)
+    sys.exit(0)
+
     board_file = open(sys.argv[1])
 
     the_game = SudokuGame()

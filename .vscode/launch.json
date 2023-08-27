@@ -13,5 +13,14 @@
             "justMyCode": true,
             "args": ["boards/20230803_hard_nyt_modified.txt"]
         }
+        {
+            "name": "Python: UnitTests",
+            "type": "python",
+            "request": "launch",
+            "program": "tests.py",
+            "console": "integratedTerminal",
+            "justMyCode": true,
+            "args": []
+        }
     ]
 }
