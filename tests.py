@@ -128,8 +128,85 @@ class TestSuso(unittest.TestCase):
         starting = board.filled_cells()
         board.apply_constraints_iteratively()
         ending = board.filled_cells()
-        print(f"starting {starting}, ending {ending}")
         self.assertNotEqual(starting, ending, "Constraints failed to process")
+
+    def test_validity_simple(self):
+
+        board_string = '002100049400900800800060320700080005050000001063004700201050670006719050080002000'
+
+        board = suso.SudokuBoard()
+        board.initialize_board_from_string(board_string)
+        self.assertTrue(board.valid())
+        board.apply_known_value(1,2,6)
+        self.assertFalse(board.valid())
+    
+        board = suso.SudokuBoard()
+        board.initialize_board_from_string(board_string)
+        board.apply_known_value(1,2,6)
+        self.assertFalse(board.valid())
+
+    def test_guessing_simple(self):
+        board_string = '002100049400900800800060320700080005050000001063004700201050670006719050080002000'
+        board = suso.SudokuBoard()
+        board.initialize_board_from_string(board_string)
+        possibilities = suso.SudokuBoard.convert_known_values_to_possibilities(board.known_values)
+        guesses = suso.SudokuBoard.convert_possibilities_to_guesses(possibilities)
+        self.assertEqual(guesses[0],(0,0,3),"First guess did not match expected")
+    
+    def test_guessing_to_invalidity(self):
+        
+        # load a hard board and advance it
+        board_string = '002100049400900800800060320700080005050000001063004700201050670006719050080002000'
+        board = suso.SudokuBoard()
+        board.initialize_board_from_string(board_string)
+        board.apply_constraints_iteratively()
+
+        while board.valid():
+            # print(f"*** Board has {board.filled_cells()} filled cells.***")
+            # print(board.print_board())
+            possibilities = suso.SudokuBoard.convert_known_values_to_possibilities(board.known_values)
+            guesses = suso.SudokuBoard.convert_possibilities_to_guesses(possibilities)
+            guess = guesses[0]
+            # print(f"Old Board Possibilities:")
+            # print(suso.SudokuBoard.print_possibilities(possibilities))
+            # print(f"\tApplying guess {guess}")
+            board.apply_known_value(guess[0],guess[1],guess[2])
+            # print(f"\tBoard validity is {board.valid()}")
+            
+            # possibilities = suso.SudokuBoard.convert_known_values_to_possibilities(board.known_values)
+            # print(f"New Board Possibilities:")
+            # print(suso.SudokuBoard.print_possibilities(possibilities))
+            
+            # print(f"\tApplying iterative contraints")
+            board.apply_constraints_iteratively()
+            # print(f"\tBoard now has has {board.filled_cells()} filled cells.")
+            # print(f"\tBoard validity is {board.valid()}")
+                
+        # possibilities = suso.SudokuBoard.convert_known_values_to_possibilities(board.known_values)
+        # print(suso.SudokuBoard.print_possibilities(possibilities))
+        self.assertFalse(board.valid())
+            
+    def test_evaluating_all_guesses(self):
+         # load a hard board and advance it
+        board_string = '002100049400900800800060320700080005050000001063004700201050670006719050080002000'
+        board = suso.SudokuBoard()
+        board.initialize_board_from_string(board_string)
+        board.apply_constraints_iteratively()
+
+        guesser = suso.SudokuGuesser()
+        guesser.add_board(board,None,None)
+        (solution,good_guesses) = guesser.process_board(board.print_board_string())
+
+        self.assertIsNotNone(solution, "checking all guesses did not yield a solution")
+
+        solved
+
+
+
+
+
+
+
 
 
                 
